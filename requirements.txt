@@ -3,3 +3,7 @@ beautifulsoup4>=4.12.0
 pydantic>=2.11.3
 asyncio>=3.4.3
 uuid>=1.30
+tiktoken==0.8.0
+openai==1.66.3
+elasticsearch==8.13.0
+elastic-transport==8.13.0
