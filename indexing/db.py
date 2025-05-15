@@ -2,7 +2,10 @@ from abc import ABC, abstractmethod
 from elasticsearch import AsyncElasticsearch
 import asyncio
 from elasticsearch.helpers import async_bulk
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
+
+from indexing.serializers import VectorSearchRequest
+
 
 class VectorDb(ABC):
     @abstractmethod
@@ -59,3 +62,104 @@ class ElasticSearchVectorDb(VectorDb):
         failed_ids = [failure['index']['_id'] for failure in failed if 'index' in failure]
 
         return {"success": success, "failed": failed_ids}
+
+    async def search_content(self, request: VectorSearchRequest, index_name: str, embedding_generator) -> List[dict]:
+        """
+        Perform a KNN similarity search and return concatenated chunks (max 3) for each result,
+        including chunk_num-1 and chunk_num+1 if available. Filters by knowledge_base_id.
+        """
+        try:
+            await self.connect()
+            # Generate query embedding
+            query_vector = await asyncio.to_thread(embedding_generator.generate_embedding, request.query)
+
+            if len(query_vector) != 1536:
+                raise ValueError(f"Query vector has incorrect dimensions: {len(query_vector)} (Expected: 1536)")
+
+            num_candidates = max(request.top_answer_count * 5, 100)
+
+            # KNN Search query
+            knn_query = {
+                "size": request.top_answer_count,
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_vector,
+                    "k": request.top_answer_count,
+                    "num_candidates": num_candidates,
+                    "filter": [
+                        {"terms": {"knowledge_base_id": request.knowledge_base_id}}
+                    ]
+                },
+                "_source": ["id", "content", "is_chunked"]
+            }
+
+            response = await self.client.search(index=index_name, body=knn_query)
+            hits = response["hits"]["hits"]
+
+            results = []
+
+            for hit in hits:
+                doc = hit["_source"]
+                doc_id = doc.get("id")
+                is_chunked = doc.get("is_chunked", False)
+
+                if not is_chunked:
+                    results.append({
+                        "content": doc.get("content"),
+                        "_score": hit["_score"]
+                    })
+                    continue
+
+                # Process chunked document
+                if "#" not in doc_id:
+                    continue  # skip invalid format
+
+                logical_id, chunk_str = doc_id.rsplit("#", 1)
+
+                try:
+                    chunk_num = int(chunk_str)
+                except ValueError:
+                    continue  # skip if chunk number is not integer
+
+                # Attempt to fetch chunk-1 and chunk+1
+                adjacent_ids = [
+                    f"{logical_id}#{chunk_num - 1}",
+                    f"{logical_id}#{chunk_num + 1}"
+                ]
+
+                # Build query to fetch additional chunks
+                chunk_query = {
+                    "size": 2,
+                    "query": {
+                        "bool": {
+                            "filter": [
+                                {"terms": {"id": adjacent_ids}}
+                            ]
+                        }
+                    },
+                    "_source": ["id", "content"]
+                }
+
+                adjacent_response = await self.client.search(index=index_name, body=chunk_query)
+                adjacent_chunks = {d["_source"]["id"]: d["_source"]["content"] for d in
+                                   adjacent_response["hits"]["hits"]}
+
+                # Order the chunks correctly: [chunk-1, current, chunk+1]
+                full_content = ""
+                if f"{logical_id}#{chunk_num - 1}" in adjacent_chunks:
+                    full_content += adjacent_chunks[f"{logical_id}#{chunk_num - 1}"] + "\n"
+                full_content += doc.get("content", "")
+                if f"{logical_id}#{chunk_num + 1}" in adjacent_chunks:
+                    full_content += "\n" + adjacent_chunks[f"{logical_id}#{chunk_num + 1}"]
+
+                results.append({
+                    "content": full_content.strip(),
+                    "_score": hit["_score"]
+                })
+
+            return results
+
+        except Exception as e:
+            raise Exception(f"Failed to perform KNN search and fetch content: {str(e)}")
+        finally:
+            await self.close()

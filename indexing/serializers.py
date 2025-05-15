@@ -68,3 +68,9 @@ class FileContent:
             "uuid": self.uuid,
             "kind": self.kind
         }
+
+class VectorSearchRequest:
+    query: str
+    knowledge_base_id: list[int]
+    matching_percentage: float
+    top_answer_count: int
