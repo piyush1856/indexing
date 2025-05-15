@@ -109,6 +109,12 @@ await loader.load({
 })
 ```
 
+The `ElasticSearchLoader` handles:
+- Creating the index with appropriate mappings if it doesn't exist
+- Batching documents for efficient insertion
+- Tracking successful and failed insertions
+- Proper connection management
+
 ### 4. Vector Search
 
 Perform semantic searches on the indexed data:
@@ -137,6 +143,13 @@ for result in results:
     print("---")
 ```
 
+The vector search functionality:
+- Converts your natural language query into an embedding vector
+- Performs cosine similarity search against the vector database
+- Returns the most semantically relevant results
+- Supports filtering by knowledge base ID and other metadata
+- Allows customization of result count and similarity thresholds
+
 ## Installation
 
 ```bash
@@ -147,12 +160,13 @@ pip install indexing
 
 - Python 3.9+
 - Dependencies:
-  - httpx
-  - beautifulsoup4
-  - pydantic
-  - asyncio
-  - uuid
-  - tiktoken
+  - httpx>=0.28.1
+  - beautifulsoup4>=4.12.0
+  - pydantic>=2.11.3
+  - asyncio>=3.4.3
+  - uuid>=1.30
+  - tiktoken==0.8.0
+  - openai==1.66.3
   - elasticsearch
 
 ## Complete Pipeline Example
@@ -260,7 +274,8 @@ async def index_local_files():
     loader = ElasticSearchLoader(db)
     await loader.load({
         "index_name": "local_files_index",
-        "documents": documents
+        "documents": documents,
+        "batch_size": 50  # Customize batch size for performance
     })
     
     # 4. Search data
@@ -279,6 +294,59 @@ async def index_local_files():
 
 # Run the pipeline
 results = asyncio.run(index_local_files())
+```
+
+## Advanced Configuration
+
+### Elasticsearch Index Settings
+
+The default Elasticsearch index settings are optimized for vector search:
+
+```python
+KNOWLEDGE_BASE_INDEXING_SETTINGS = {
+    "settings": {
+        "number_of_shards": 5,
+        "number_of_replicas": 2
+    },
+    "mappings": {
+        "properties": {
+            "id": {"type": "keyword"},
+            "title": {"type": "text", "analyzer": "standard"},
+            "content": {
+                "type": "text",
+                "index": False,
+                "store": False
+            },
+            "embedding": {
+                "type": "dense_vector",
+                "dims": 1536,
+                "index": True,
+                "similarity": "cosine"
+            },
+            "chunk_references": {"type": "keyword"},
+            "source": {"type": "keyword"},
+            "is_chunked": {"type": "boolean"},
+            "is_public": {"type": "boolean"},
+            "description": {"type": "text"},
+            "knowledge_base_id": {"type": "keyword"},
+            "metadata": {
+                "type": "object",
+                "dynamic": True
+            }
+        }
+    }
+}
+```
+
+You can customize these settings when loading data:
+
+```python
+await loader.load({
+    "index_name": "my_custom_index",
+    "documents": documents,
+    "settings": custom_settings,
+    "batch_size": 100
+})
 ```
 
 ## Contributing
