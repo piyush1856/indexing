@@ -42,7 +42,6 @@ class ElasticSearchVectorDb(VectorDb):
     async def create_index(self, index_name: str, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         try:
             if await self.client.indices.exists(index=index_name):
-                print(f"⚠️ Index '{index_name}' already exists. Skipping creation.")
                 return {"acknowledged": False, "message": "Index already exists"}
 
             return await self.client.indices.create(index=index_name, body=settings)
