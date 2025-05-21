@@ -1,6 +1,7 @@
 import enum
 import hashlib
 import uuid
+from pydantic import BaseModel
 
 class SourceItemKind(enum.Enum):
     file = "file"
@@ -69,7 +70,7 @@ class FileContent:
             "kind": self.kind
         }
 
-class VectorSearchRequest:
+class VectorSearchRequest(BaseModel):
     query: str
     knowledge_base_id: list[int]
     matching_percentage: float
